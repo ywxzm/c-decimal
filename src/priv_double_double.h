@@ -92,8 +92,7 @@ static inline void mg_dd_value_of_uint64(uint64_t value, mg_dd_t *ret)
 		lo = -(double)((uint64_t)(hi) - value);
 	}
 
-	ret->hi = hi;
-	ret->lo = lo;
+	mg_dd_quick_twosum(hi, lo, /*out*/ret);
 }
 
 static inline void mg_dd_value_of_double(double value, mg_dd_t *ret)
