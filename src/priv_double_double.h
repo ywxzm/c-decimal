@@ -71,6 +71,21 @@ static inline void mg_dd_twoprod(double a, double b, mg_dd_t *ret)
 	ret->lo = e;
 }
 
+static inline void mg_dd_twodiv(double a, double b, mg_dd_t *ret)
+{
+	double s = a / b;
+	double v = s * b;
+	double tmp = (a - v);
+	double e;
+	if(tmp != 0.0)
+		e = tmp / b;
+	else 
+		e = 0.0;
+
+	ret->hi = s;
+	ret->lo = e;
+}
+
 static inline uint64_t mg_dd_get_uint64(const mg_dd_t *op1)
 {
 	if(op1->hi >= 0.0) {
