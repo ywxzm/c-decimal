@@ -52,13 +52,11 @@ static inline void mg_uint256_sub(/*inout*/mg_uint256 *op1, const mg_uint256 *op
 static inline void mg_uint256_neg(/*inout*/mg_uint256 *op1);
 static inline void mg_uint256_mul128(const mg_uint256 *op1, const mg_uint256 *op2, /*out*/mg_uint256 *ret); // multiply for low bits.
 static inline void mg_uint256_mul(const mg_uint256 *op1, const mg_uint256 *op2, /*out*/mg_uint256 *ret, /*out*/int *overflow);
-extern mg_decimal_error mg_uint256_div(/*inout*/mg_uint256 *op1, const mg_uint256 *op2, /*out*/mg_uint256 *quotient);
-
+MG_PRIVATE mg_decimal_error mg_uint256_div(/*inout*/mg_uint256 *op1, const mg_uint256 *op2, /*out*/mg_uint256 *quotient);
 
 static inline void mg_uint256_or(/*inout*/mg_uint256 *op1, const mg_uint256 *op2);
 static inline void mg_uint256_left_shift(/*inout*/mg_uint256 *op1, int op2);
 static inline void mg_uint256_right_shift(/*inout*/mg_uint256 *op1, int op2);
-
 
 /**
  * These functions includes for mg_decimal.
@@ -66,9 +64,9 @@ static inline void mg_uint256_right_shift(/*inout*/mg_uint256 *op1, int op2);
 static inline bool mg_uint256_is_overflow_int64(const mg_uint256 *op1);
 static inline int64_t mg_uint256_get_int64(mg_uint256 *op1);
 static inline const mg_uint256 *mg_uint256_get_10eN(int digits);
-extern int mg_uint256_get_digits(const mg_uint256 *value);
+MG_PRIVATE int mg_uint256_get_digits(const mg_uint256 *value);
 
-static inline void mg_uint256_modulus_by_scale(/*inout*/mg_uint256 *op1, int op2);
+static inline void mg_uint256_get_bits(/*inout*/mg_uint256 *op1, int op2);
 static inline int mg_uint256_get_max_bit_index(const mg_uint256 *value);
 
 MG_PRIVATE void mg_uint256_test_to_string(const mg_uint256 *value, char *buf);
@@ -211,7 +209,7 @@ static inline void mg_uint256_neg(mg_uint256 *op1)
 	c = mg_uint64_add(c, op1->word[3], 0, &op1->word[3]);
 }
 
-static inline void mg_uint256_mul_with_words(const mg_uint256 *op1, int op1_words, const mg_uint256 *op2, int op2_words, /*out*/mg_uint256 *ret, /*out*/int *overflow)
+static inline void mg_uint256_mul_words(const mg_uint256 *op1, int op1_words, const mg_uint256 *op2, int op2_words, /*out*/mg_uint256 *ret, /*out*/int *overflow)
 {
 	unsigned carry, carry2;
 	uint64_t lo, hi;
@@ -298,56 +296,105 @@ static inline void mg_uint256_mul(const mg_uint256 *op1, const mg_uint256 *op2, 
 	while(op2_digits > 0 && op2->word[op2_digits-1] == 0)
 		op2_digits--;
 
-	mg_uint256_mul_with_words(op1, op1_digits, op2, op2_digits, /*out*/ret, /*out*/overflow);
+	mg_uint256_mul_words(op1, op1_digits, op2, op2_digits, /*out*/ret, /*out*/overflow);
 }
 
 static inline void mg_uint256_or(/*inout*/mg_uint256 *op1, const mg_uint256 *op2)
 {
-	for(int i = 0; i < MG_UINT256_WORD_COUNT; i++)
+	for(int i = 0; i < MG_UINT256_WORD_COUNT; i++) {
 		op1->word[i] = op1->word[i] | op2->word[i];
+	}
 }
 
 static inline void mg_uint256_left_shift(/*inout*/mg_uint256 *op1, int op2)
 {
+	int i;
+	mg_uint256 r;
+
 	int bytes = op2 / MG_UINT256_WORD_BITS;
 	int bits = op2 % MG_UINT256_WORD_BITS;
-	
-	for(int i = MG_UINT256_WORD_COUNT; i > bytes; i--) {
-		op1->word[i-1] = op1->word[i-bytes-1];
-	}
-	for(int i = 0; i < bytes; i++) {
-		op1->word[i] = 0;
-	}
-	
-	if(bits != 0) {
-		mg_uint256 ret;
-		ret.word[0] = (op1->word[0] << bits);
-		for(int i = 1; i < MG_UINT256_WORD_COUNT; i++) {
-			ret.word[i] = (op1->word[i] << bits) | (op1->word[i-1]  >> (MG_UINT256_WORD_BITS - bits));
+
+	if(bytes >= MG_UINT256_WORD_COUNT) {
+		mg_uint256_set_zero(op1);
+	} else if(bytes != 0) {
+		if(bits != 0) {
+			for(i = 0; i < bytes; i++) {
+				r.word[i] = 0;
+			}
+			r.word[i] = (op1->word[i-bytes] << bits);
+			i++;
+			for(; i < MG_UINT256_WORD_COUNT; i++) {
+				r.word[i] = (op1->word[i-bytes] << bits) | (op1->word[i-bytes-1] >> (MG_UINT256_WORD_BITS - bits));
+			}
+
+			*op1 = r;
+		} else {
+			for(i = 0; i < bytes; i++) {
+				r.word[i] = 0;
+			}
+			for(; i < MG_UINT256_WORD_COUNT; i++) {
+				r.word[i] = op1->word[i-bytes];
+			}
+
+			*op1 = r;
 		}
-		*op1 = ret;
+	} else {
+		if(bits != 0) {
+			i = 0;
+			r.word[i] = (op1->word[i] << bits);
+			i++;
+			for(; i < MG_UINT256_WORD_COUNT; i++) {
+				r.word[i] = (op1->word[i-bytes] << bits) | (op1->word[i-bytes-1] >> (MG_UINT256_WORD_BITS - bits));
+			}
+
+			*op1 = r;
+		}
 	}
 }
 
 static inline void mg_uint256_right_shift(/*inout*/mg_uint256 *op1, int op2)
 {
+	int i;
+	mg_uint256 r;
+
 	int bytes = op2 / MG_UINT256_WORD_BITS;
 	int bits = op2 % MG_UINT256_WORD_BITS;
 
-	for(int i = bytes; i < MG_UINT256_WORD_COUNT; i++) {
-		op1->word[i-bytes] = op1->word[i];
-	}
-	for(int i = MG_UINT256_WORD_COUNT - bytes; i < MG_UINT256_WORD_COUNT; i++) {
-		op1->word[i] = 0;
-	}
+	if(bytes >= MG_UINT256_WORD_COUNT) {
+		mg_uint256_set_zero(op1);
+	} else if(bytes != 0) {
+		if(bits != 0) {
+			for(i = 0; i < MG_UINT256_WORD_COUNT - bytes - 1; i++) {
+				r.word[i] = (op1->word[i+bytes] >> bits) | (op1->word[i+bytes+1] << (MG_UINT256_WORD_BITS - bits));
+			}
+			r.word[i] = (op1->word[i+bytes] >> bits);
+			i++;
+			for(; i < MG_UINT256_WORD_COUNT; i++) {
+				r.word[i] = 0;
+			}
 
-	if(bits != 0) {
-		mg_uint256 ret;
-		for(int i = 0; i < MG_UINT256_WORD_COUNT - 1; i++) {
-			ret.word[i] = (op1->word[i] >> bits) | (op1->word[i+1] << (MG_UINT256_WORD_BITS - bits));
+			*op1 = r;
+		} else {
+			for(i = 0; i < MG_UINT256_WORD_COUNT - bytes; i++) {
+				op1->word[i] = op1->word[i+bytes];
+			}
+			for(; i < MG_UINT256_WORD_COUNT; i++) {
+				op1->word[i] = 0;
+			}
 		}
-		ret.word[MG_UINT256_WORD_COUNT-1] = (op1->word[MG_UINT256_WORD_COUNT-1] >> bits);
-		*op1 = ret;
+	} else {
+		if(bits != 0) {
+			for(i = 0; i < MG_UINT256_WORD_COUNT - 1; i++) {
+				r.word[i] = (op1->word[i] >> bits) | (op1->word[i+1] << (MG_UINT256_WORD_BITS - bits));
+			}
+			r.word[i] = (op1->word[i] >> bits);
+			i++;
+			for(; i < MG_UINT256_WORD_COUNT; i++) {
+				r.word[i] = 0;
+			}
+
+			*op1 = r;
+		}
 	}
 }
 
@@ -358,12 +405,12 @@ static inline const mg_uint256 *mg_uint256_get_10eN(int digits)
 	return MG_UINT256_10eN_TABLE[digits];
 }
 
-static inline void mg_uint256_modulus_by_scale(/*inout*/mg_uint256 *op1, int op2)
+static inline void mg_uint256_get_bits(/*inout*/mg_uint256 *op1, int op2)
 {
 	int bytes = op2 / MG_UINT256_WORD_BITS;
 	int bits = op2 % MG_UINT256_WORD_BITS;
 
-	for(int i = bytes + 1; i < MG_UINT256_WORD_COUNT; i++) {
+	for(int i = bytes + (bits > 0 ? 1 : 0); i < MG_UINT256_WORD_COUNT; i++) {
 		op1->word[i] = 0;
 	}
 
