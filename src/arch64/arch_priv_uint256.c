@@ -5,6 +5,7 @@
  * 256 bit integer for decimal.
  * this source includes decimal implementation.
  */
+#include <priv_double_double.h>
 #include "arch_priv_uint256.h"
 
 static const mg_uint256 V_10e0 = { 0x1 };
@@ -137,24 +138,41 @@ typedef double max_float_t;
 #define DOUBLE_LSHIFT_64		(18446744073709551616.0)
 #define DOUBLE_CORRECT			(0.999999)
 
-static inline void set_double(mg_uint256 *op1, max_float_t value, int n)
+static inline void set_double(mg_uint256 *op1, const mg_dd_t *value, int n)
 {
 	mg_uint256_set_zero(op1);
 
 	if (n == 0) {
-		op1->word[n] = (uint64_t) value;
+		op1->word[n] = mg_dd_get_uint64(value);
 	} else {
-		op1->word[n] = (uint64_t) value;
-		value -= op1->word[n];
-		value *= DOUBLE_LSHIFT_64;
-		op1->word[n - 1] = (uint64_t)value;
+		op1->word[n] = mg_dd_get_uint64(value);
+
+		mg_dd_t tmp = *value;
+		__mg_dd_get_decimal_part(&tmp);
+
+		mg_dd_mul_double(&tmp, DOUBLE_LSHIFT_64, /*out*/&tmp);
+		op1->word[n - 1] = mg_dd_get_uint64(&tmp);
 	}
 }
+
+//static inline void set_double(mg_uint256 *op1, max_float_t value, int n)
+//{
+//	mg_uint256_set_zero(op1);
+//
+//	if (n == 0) {
+//		op1->word[n] = (uint64_t) value;
+//	} else {
+//		op1->word[n] = (uint64_t) value;
+//		value -= op1->word[n];
+//		value *= DOUBLE_LSHIFT_64;
+//		op1->word[n - 1] = (uint64_t)value;
+//	}
+//}
 
 MG_PRIVATE mg_decimal_error mg_uint256_div(mg_uint256 *op1, const mg_uint256 *op2, mg_uint256 *quotient)
 {
 	mg_decimal_error err = 0;
-	max_float_t op1_v, op2_v, q_tmp;
+	//max_float_t op1_v, op2_v, q_tmp;
 	mg_uint256 buf1, buf2, buf3;
 	mg_uint256 *q = &buf1, *qv = &buf2, *qv_hi = &buf3;
 	int q_n, underflow;
@@ -176,9 +194,22 @@ MG_PRIVATE mg_decimal_error mg_uint256_div(mg_uint256 *op1, const mg_uint256 *op
 		mg_uint256_set(op1, op1->word[0] % op2->word[0]);
 		goto _EXIT;
 	}
-	
-	op2_v = (max_float_t)op2->word[op2_digits -1];
-	if(op2_digits >= 2)
+
+	//mg_dd_t op2_v;
+	//mg_dd_value_of_uint64(op2->word[op2_digits -1], /*out*/&op2_v);
+	//if(op2_digits >= 2) {
+	//	mg_dd_t op2_v2;
+	//	mg_dd_value_of_uint64(op2->word[op2_digits -2], /*out*/&op2_v2);
+	//	mg_dd_mul_double(&op2_v2, DOUBLE_RSHIFT_64, /*out*/&op2_v2);
+	//	mg_dd_add(&op2_v, &op2_v2, /*out*/&op2_v);
+	//}
+
+	//mg_dd_t op2_v_inv;
+	//mg_dd_value_of_double(1.0, /*out*/&op2_v_inv);
+	//mg_dd_div(&op2_v_inv, &op2_v, /*out*/&op2_v_inv);
+
+	max_float_t op2_v = (max_float_t)op2->word[op2_digits -1];
+	if(op2_digits >= 2) 
 		op2_v += (max_float_t)op2->word[op2_digits-2] * DOUBLE_RSHIFT_64;
 
 	if(op2_v == 0.0) {
@@ -191,29 +222,53 @@ MG_PRIVATE mg_decimal_error mg_uint256_div(mg_uint256 *op1, const mg_uint256 *op
 	mg_uint256_set_zero(quotient);
 
 	while (mg_uint256_compare(op1, op2) >= 0) {
-		op1_v = (max_float_t)op1->word[op1_digits-1];
+		//mg_dd_t op1_v;
+		//mg_dd_value_of_uint64(op1->word[op1_digits -1], /*out*/&op1_v);
+		//if(op1_digits >= 2) {
+		//	mg_dd_t op1_v2;
+		//	mg_dd_value_of_uint64(op1->word[op1_digits -2], /*out*/&op1_v2);
+		//	mg_dd_mul_double(&op1_v2, DOUBLE_RSHIFT_64, /*out*/&op1_v2);
+		//	mg_dd_add(&op1_v, &op1_v2, /*out*/&op1_v);
+		//}
+		max_float_t op1_v = (max_float_t)op1->word[op1_digits-1];
 		if(op1_digits >= 2)
 			op1_v += (max_float_t)op1->word[op1_digits-2] * DOUBLE_RSHIFT_64;
 
 		q_n = op1_digits - op2_digits;
-		q_tmp = op1_v * op2_v_inv;
-		if((q_tmp < 1.0 && q_n == 0)) {
-			q_tmp = 1.0;
+
+		mg_dd_t q_tmp;
+		mg_dd_twoprod(op1_v, op2_v_inv, &q_tmp);
+		if(q_n == 0 && mg_dd_compare(&q_tmp, 1.0) < 0) {
+			mg_dd_value_of_double(1.0, &q_tmp);
 		}
 		// オーバーフロー防止
-		if(q_tmp >= DOUBLE_LSHIFT_64) {
-			q_tmp *= DOUBLE_CORRECT;
+		if(mg_dd_compare(&q_tmp, DOUBLE_LSHIFT_64) >= 0) {
+			mg_dd_mul_double(&q_tmp, DOUBLE_CORRECT, /*out*/&q_tmp);
 		}
 
-		set_double(q, q_tmp, q_n);
+		set_double(/*out*/q, &q_tmp, q_n);
+	
+		//double q_tmp = op1_v * op2_v_inv;
+		//if((q_tmp < 1.0 && q_n == 0)) {
+		//	q_tmp = 1.0;
+		//}
+		//// オーバーフロー防止
+		//if(q_tmp >= DOUBLE_LSHIFT_64) {
+		//	q_tmp = 1.0;
+		//}
+
+		//set_double(/*out*/q, q_tmp, q_n);
 
 		int overflow;
 		mg_uint256_mul_words(
 			op2, op2_digits, q, q_n + 1, /*out*/qv, /*out*/&overflow);
 
 		while(overflow || mg_uint256_compare(op1, qv) < 0) {
-			q_tmp *= DOUBLE_CORRECT;
-			set_double(q, q_tmp, q_n);
+			mg_dd_mul_double(&q_tmp, DOUBLE_CORRECT, /*out*/&q_tmp);
+			set_double(/*out*/q, &q_tmp, q_n);
+
+			//q_tmp *= DOUBLE_CORRECT;
+			//set_double(/*out*/q, q_tmp, q_n);
 
 			mg_uint256_mul_words(
 				op2, op2_digits, q, q_n + 1, /*out*/qv, /*out*/&overflow);

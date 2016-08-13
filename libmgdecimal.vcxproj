@@ -28,6 +28,7 @@
     <ClInclude Include="include\magica\math\mgcompat.h" />
     <ClInclude Include="src\priv_decimal.h" />
     <ClInclude Include="src\priv_double.h" />
+    <ClInclude Include="src\priv_double_double.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\decimal.c" />

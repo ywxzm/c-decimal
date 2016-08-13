@@ -7,7 +7,9 @@
 #pragma once
 
 #include <assert.h>
-#include <math.h>
+#include <stdint.h>
+
+#define __X86_FMA
 
 #if defined(__X86_FMA)
 #include <immintrin.h>
@@ -28,7 +30,7 @@ static inline uint64_t mg_dd_init(mg_dd_t *op1)
 static inline void mg_dd_twosum(double a, double b, mg_dd_t *ret)
 {
 	double s = a + b;
-	double v = sh - a;
+	double v = s - a;
 	double e = (a - (s - v)) + (b - v);
 	
 	ret->hi = s;
@@ -44,6 +46,7 @@ static inline void mg_dd_quick_twosum(double a, double b, mg_dd_t *ret)
 	ret->lo = e;
 }
 
+
 static inline void mg_dd_twoprod(double a, double b, mg_dd_t *ret)
 {
 #if defined(__X86_FMA)
@@ -53,11 +56,11 @@ static inline void mg_dd_twoprod(double a, double b, mg_dd_t *ret)
 			_mm_set_sd(a), _mm_set_sd(b), _mm_set_sd(p)));
 #else
 	double a_tmp = a * (double)(1 << 27);
-	double a_hi = tmp - (tmp - a);
+	double a_hi = a_tmp - (a_tmp - a);
 	double a_lo = a - a_hi;
 	
 	double b_tmp = b * (double)(1 << 27);
-	double b_hi = tmp - (tmp - b);
+	double b_hi = b_tmp - (b_tmp - b);
 	double b_lo = b - b_hi;
 
 	double p = a * b;
@@ -71,9 +74,9 @@ static inline void mg_dd_twoprod(double a, double b, mg_dd_t *ret)
 static inline uint64_t mg_dd_get_uint64(const mg_dd_t *op1)
 {
 	if(op1->hi >= 0.0) {
-	    return (uint64_t)op1->hi + (uint64_t)op1->lo;
+		return (uint64_t)op1->hi + (uint64_t)op1->lo;
 	} else {
-		assert(0);
+		return 0;
 	}
 }
 
@@ -92,7 +95,7 @@ static inline void mg_dd_value_of_uint64(uint64_t value, mg_dd_t *ret)
 		lo = -(double)((uint64_t)(hi) - value);
 	}
 
-	mg_dd_quick_twosum(hi, lo, /*out*/ret);
+	mg_dd_twosum(hi, lo, /*out*/ret);
 }
 
 static inline void mg_dd_value_of_double(double value, mg_dd_t *ret)
@@ -108,7 +111,7 @@ static inline void mg_dd_add(const mg_dd_t *op1, const mg_dd_t *op2, mg_dd_t *re
 	
 	z.lo += op1->lo + op2->lo;
 	
-	mg_dd_quick_twosum(z.hi, z.lo, /*out*/ret);
+	mg_dd_twosum(z.hi, z.lo, /*out*/ret);
 }
 
 static inline void mg_dd_sub(const mg_dd_t *op1, const mg_dd_t *op2, mg_dd_t *ret)
@@ -118,7 +121,7 @@ static inline void mg_dd_sub(const mg_dd_t *op1, const mg_dd_t *op2, mg_dd_t *re
 	
 	z.lo += op1->lo - op2->lo;
 	
-	mg_dd_quick_twosum(z.hi, z.lo, /*out*/ret);
+	mg_dd_twosum(z.hi, z.lo, /*out*/ret);
 }
 
 static inline void mg_dd_mul(const mg_dd_t *op1, const mg_dd_t *op2, mg_dd_t *ret)
@@ -128,7 +131,7 @@ static inline void mg_dd_mul(const mg_dd_t *op1, const mg_dd_t *op2, mg_dd_t *re
 	
 	z.lo += op1->hi * op2->lo + op1->lo * op2->hi + op1->lo * op2->lo;
 	
-	mg_dd_quick_twosum(s.hi, s.lo, /*out*/ret);
+	mg_dd_twosum(z.hi, z.lo, /*out*/ret);
 }
 
 static inline void mg_dd_div(const mg_dd_t *op1, const mg_dd_t *op2, mg_dd_t *ret)
@@ -137,9 +140,10 @@ static inline void mg_dd_div(const mg_dd_t *op1, const mg_dd_t *op2, mg_dd_t *re
 	mg_dd_t t;
 	mg_dd_twoprod(-z_hi, op2->hi, &t);
 	
-	double z_lo = ((((t.hi + op1->hi) - z_hi * op2->lo) + t.lo) / (op2->hi + op2->lo);
-	
-	mg_dd_quick_twosum(z_hi, z_lo, /*out*/ret);
+	double z_lo = (((t.hi + op1->hi) - z_hi * op2->lo) + t.lo) / (op2->hi + op2->lo);
+	//double z_lo = ((((t.hi + op1->hi) - z_hi * op2->lo) + op1->lo) + t.lo) / op2->hi;
+
+	mg_dd_twosum(z_hi, z_lo, /*out*/ret);
 }
 
 static inline void mg_dd_mul_double(const mg_dd_t *op1, double op2, mg_dd_t *ret)
@@ -147,9 +151,9 @@ static inline void mg_dd_mul_double(const mg_dd_t *op1, double op2, mg_dd_t *ret
 	mg_dd_t z;
 	mg_dd_twoprod(op1->hi, op2, &z);
 	
-	z.lo += op1->lo * op2->hi;
+	z.lo += op1->lo * op2;
 	
-	mg_dd_quick_twosum(s.hi, s.lo, /*out*/ret);
+	mg_dd_twosum(z.hi, z.lo, /*out*/ret);
 }
 
 static inline int mg_dd_compare(const mg_dd_t *op1, double value)
@@ -166,6 +170,9 @@ static inline int mg_dd_compare(const mg_dd_t *op1, double value)
 
 static inline void __mg_dd_get_decimal_part(mg_dd_t *op1)
 {
-	op1->hi -= (uint64_t)op1->hi;
-	op1->lo -= (uint64_t)op1->lo;
+	uint64_t hi = (uint64_t)op1->hi;
+	int64_t lo = (int64_t)op1->lo;
+
+	op1->hi -= (double)hi;
+	op1->lo -= (double)lo;
 }
